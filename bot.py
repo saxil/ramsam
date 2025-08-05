@@ -1,5 +1,5 @@
 # bot.py
-# Final version with fixes for /mail command and persistence.
+# Final corrected version, fixing the NameError in the AI function.
 
 import os
 import logging
@@ -73,6 +73,17 @@ def send_email(subject, body):
 
 # --- 3. TELEGRAM BOT LOGIC ---
 
+async def generate_gemini_response(prompt: str) -> str:
+    """(FIXED) Sends a prompt to the Gemini API and returns the text response."""
+    try:
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        # This line is now correct and calls the model, not itself.
+        response = await model.generate_content_async(prompt)
+        return response.text
+    except Exception as e:
+        logger.error(f"Error communicating with Gemini API: {e}")
+        return "Sorry, I'm having trouble connecting to my brain right now."
+
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_name = update.message.from_user.first_name
     welcome_message = (
@@ -97,18 +108,12 @@ async def code_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     output = await generate_gemini_response(execution_prompt)
     await update.message.reply_text(f"Output:\n```\n{output}\n```", parse_mode=ParseMode.MARKDOWN_V2)
 
-
 async def mail_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """(FIXED) Drafts an email and shows a 'Send' button."""
-    
-    # This is a much more robust way to get the text after the command
     if not context.args:
         await update.message.reply_text("Usage: /mail <Subject Line>\n<Body of the email...>")
         return
         
-    # Re-join the arguments to get the full content string, preserving newlines
     content = " ".join(context.args)
-
     try:
         subject, body = content.split('\n', 1)
     except ValueError:
@@ -116,7 +121,6 @@ async def mail_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         body = "[No body provided]"
 
     context.user_data['email_draft'] = {'subject': subject, 'body': body}
-
     user_name = update.message.from_user.first_name
     email_template = f"*Subject:* {subject}\n\n*Dear Team,*\n\n{body}\n\n*Best regards,*\n{user_name}"
     
@@ -129,9 +133,7 @@ async def mail_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=reply_markup
     )
 
-
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handles clicks on the inline buttons."""
     query = update.callback_query
     await query.answer()
 
@@ -142,7 +144,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         success = send_email(draft['subject'], draft['body'])
-
         if success:
             await query.edit_message_text(text="✅ Email sent successfully!")
         else:
@@ -151,7 +152,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if 'email_draft' in context.user_data:
             del context.user_data['email_draft']
 
-
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message_text = update.message.text
     chat_id = update.effective_chat.id
@@ -159,12 +159,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ai_response = await generate_gemini_response(message_text)
     await update.message.reply_text(ai_response)
 
-
 # --- 4. MAIN EXECUTION ---
 
 def run_bot():
-    """Initializes and runs the Telegram bot."""
-    # Use DictPersistence for simple, in-memory storage of user_data
     persistence = DictPersistence()
     application = Application.builder().token(TELEGRAM_TOKEN).persistence(persistence).build()
     
@@ -176,7 +173,6 @@ def run_bot():
 
     logger.info("Telegram bot is now polling for messages.")
     application.run_polling()
-
 
 if __name__ == "__main__":
     flask_thread = threading.Thread(target=run_flask)
