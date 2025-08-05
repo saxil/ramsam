@@ -1,5 +1,3 @@
-# bot.py
-# Final version with simulated code execution via AI
 
 import os
 import logging
@@ -64,24 +62,19 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• `/mail <Subject>\n<Body>` - Formats your text as an email.\n\n"
         "You can also chat with me normally, or mention me in a group!"
     )
+    # The .reply_text() function automatically replies to the user's command.
     await update.message.reply_text(welcome_message)
 
 
 async def code_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Simulates Python code execution by sending it to the Gemini AI.
-    This is a SAFE way to run user-provided code.
-    """
+    """Simulates Python code execution by sending it to the Gemini AI."""
     if not context.args:
         await update.message.reply_text("Usage: /code <python code snippet to execute>")
         return
     
     user_code = " ".join(context.args)
-    
-    # Show a "typing..." status as this may take a moment
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action='typing')
     
-    # Create a special prompt to instruct the AI to act as an interpreter
     execution_prompt = (
         "You are a Python code execution engine. "
         "Execute the following Python code and return ONLY the standard output (stdout). "
@@ -91,10 +84,9 @@ async def code_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Code:\n```python\n{user_code}\n```"
     )
     
-    # Get the simulated output from Gemini
     output = await generate_gemini_response(execution_prompt)
     
-    # Send the output back to the user, formatted as a code block
+    # This also replies directly to the user's /code message.
     await update.message.reply_text(
         f"Output:\n```\n{output}\n```",
         parse_mode=ParseMode.MARKDOWN_V2
@@ -122,6 +114,7 @@ async def mail_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"*Best regards,*\n{user_name}"
     )
     
+    # This also replies directly to the user's /mail message.
     await update.message.reply_text(
         f"Here is your email draft:\n---\n{email_template}",
         parse_mode=ParseMode.MARKDOWN_V2
@@ -139,6 +132,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     ai_response = await generate_gemini_response(message_text)
     
+    # This line sends the ai_response AS A REPLY to the user's original message.
     await update.message.reply_text(ai_response)
 
 
@@ -147,6 +141,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main() -> None:
     """Initializes and runs the Telegram bot."""
     logger.info("Bot is starting...")
+
     application = Application.builder().token(TELEGRAM_TOKEN).build()
 
     application.add_handler(CommandHandler("start", start_command))
@@ -160,4 +155,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
