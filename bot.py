@@ -1,5 +1,5 @@
 # bot.py
-# Final version with email sending functionality.
+# Final version with fixes for /mail command and persistence.
 
 import os
 import logging
@@ -10,7 +10,7 @@ from flask import Flask
 
 import google.generativeai as genai
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes, DictPersistence
 from telegram.constants import ParseMode
 
 # --- 1. CONFIGURATION & SETUP ---
@@ -30,7 +30,6 @@ SENDER_EMAIL = os.getenv("SENDER_EMAIL")
 SENDER_APP_PASSWORD = os.getenv("SENDER_APP_PASSWORD")
 RECIPIENT_EMAIL = os.getenv("RECIPIENT_EMAIL")
 
-# Security Check for all necessary variables
 if not all([TELEGRAM_TOKEN, GEMINI_API_KEY, SENDER_EMAIL, SENDER_APP_PASSWORD, RECIPIENT_EMAIL]):
     logger.critical("FATAL ERROR: One or more environment variables are not set.")
     exit()
@@ -62,7 +61,6 @@ def send_email(subject, body):
         msg['From'] = SENDER_EMAIL
         msg['To'] = RECIPIENT_EMAIL
 
-        # Connect to Gmail's SMTP server using SSL
         with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
             smtp.login(SENDER_EMAIL, SENDER_APP_PASSWORD)
             smtp.send_message(msg)
@@ -75,7 +73,6 @@ def send_email(subject, body):
 
 # --- 3. TELEGRAM BOT LOGIC ---
 
-# ... (start_command, code_command, generate_gemini_response functions are the same)
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_name = update.message.from_user.first_name
     welcome_message = (
@@ -86,7 +83,6 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(welcome_message)
 
 async def code_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # This function remains unchanged
     if not context.args:
         await update.message.reply_text("Usage: /code <python code snippet to execute>")
         return
@@ -103,14 +99,15 @@ async def code_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def mail_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Drafts an email and shows a 'Send' button."""
-    full_command_text = update.message.text
-    command_name = update.message.entities[0]
-    content = full_command_text[command_name.offset + command_name.length:].strip()
-
-    if not content:
+    """(FIXED) Drafts an email and shows a 'Send' button."""
+    
+    # This is a much more robust way to get the text after the command
+    if not context.args:
         await update.message.reply_text("Usage: /mail <Subject Line>\n<Body of the email...>")
         return
+        
+    # Re-join the arguments to get the full content string, preserving newlines
+    content = " ".join(context.args)
 
     try:
         subject, body = content.split('\n', 1)
@@ -118,16 +115,12 @@ async def mail_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         subject = content
         body = "[No body provided]"
 
-    # Store the draft in the user's context to be used by the button handler later
     context.user_data['email_draft'] = {'subject': subject, 'body': body}
 
     user_name = update.message.from_user.first_name
     email_template = f"*Subject:* {subject}\n\n*Dear Team,*\n\n{body}\n\n*Best regards,*\n{user_name}"
     
-    # Create the inline button
-    keyboard = [
-        [InlineKeyboardButton("Send Email", callback_data='send_email_confirm')],
-    ]
+    keyboard = [[InlineKeyboardButton("Send Email", callback_data='send_email_confirm')]]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await update.message.reply_text(
@@ -136,19 +129,18 @@ async def mail_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=reply_markup
     )
 
+
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handles clicks on the inline buttons."""
     query = update.callback_query
-    await query.answer()  # Acknowledge the button press
+    await query.answer()
 
     if query.data == 'send_email_confirm':
-        # Retrieve the draft from user context
         draft = context.user_data.get('email_draft')
         if not draft:
-            await query.edit_message_text(text="Sorry, I couldn't find the email draft to send.")
+            await query.edit_message_text(text="Sorry, I couldn't find the email draft. Please try again.")
             return
 
-        # Send the email
         success = send_email(draft['subject'], draft['body'])
 
         if success:
@@ -156,11 +148,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await query.edit_message_text(text="❌ Failed to send email. Please check the server logs.")
         
-        # Clear the draft
-        del context.user_data['email_draft']
+        if 'email_draft' in context.user_data:
+            del context.user_data['email_draft']
+
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # This function remains unchanged
     message_text = update.message.text
     chat_id = update.effective_chat.id
     await context.bot.send_chat_action(chat_id=chat_id, action='typing')
@@ -172,15 +164,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def run_bot():
     """Initializes and runs the Telegram bot."""
-    # We need to enable persistence to share data between handlers
-    persistence = ExtBotPersistence(data_path='./bot_persistence')
+    # Use DictPersistence for simple, in-memory storage of user_data
+    persistence = DictPersistence()
     application = Application.builder().token(TELEGRAM_TOKEN).persistence(persistence).build()
     
-    # Register all handlers, including the new button handler
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("code", code_command))
     application.add_handler(CommandHandler("mail", mail_command))
-    application.add_handler(CallbackQueryHandler(button_handler)) # New handler for buttons
+    application.add_handler(CallbackQueryHandler(button_handler))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     logger.info("Telegram bot is now polling for messages.")
@@ -192,3 +183,4 @@ if __name__ == "__main__":
     flask_thread.start()
     
     run_bot()
+
