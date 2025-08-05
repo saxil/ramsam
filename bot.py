@@ -1,5 +1,5 @@
 # bot.py
-# Secure version that reads API keys from the hosting environment
+# Secure version with TEMPORARY debugging lines
 
 import os
 import logging
@@ -18,10 +18,6 @@ from telegram.ext import (
 )
 
 # --- Configuration ---
-# Get your API keys directly from the environment variables (provided by Render)
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-
 # Set up logging
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
@@ -29,10 +25,33 @@ logging.basicConfig(
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
+
+# --- TEMPORARY DEBUGGING ---
+# We will check the environment variables right at the start.
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
+logger.info("--- STARTING DEBUG CHECK ---")
+logger.info(f"Is TELEGRAM_TOKEN found? {TELEGRAM_TOKEN is not None}")
+logger.info(f"Is GEMINI_API_KEY found? {GEMINI_API_KEY is not None}")
+
+# Let's check the first 5 characters to confirm they are loaded.
+if TELEGRAM_TOKEN:
+    logger.info(f"Telegram Token starts with: {TELEGRAM_TOKEN[:5]}")
+else:
+    logger.warning("Telegram Token is MISSING.")
+    
+if GEMINI_API_KEY:
+    logger.info(f"Gemini Key starts with: {GEMINI_API_KEY[:5]}")
+else:
+    logger.warning("Gemini API Key is MISSING.")
+logger.info("--- FINISHED DEBUG CHECK ---")
+# --- END OF DEBUGGING ---
+
+
 # --- Security Check ---
 if not TELEGRAM_TOKEN or not GEMINI_API_KEY:
-    logger.critical("CRITICAL ERROR: API keys are not set in the environment.")
-    # The bot will not start without the keys.
+    logger.critical("CRITICAL ERROR: API keys not set. Exiting.")
     exit()
 
 # Configure the Gemini API
@@ -40,7 +59,7 @@ genai.configure(api_key=GEMINI_API_KEY)
 
 
 # --- All your command and message handlers remain the same ---
-
+# (The rest of your code for start_command, code_command, etc. goes here)
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_name = update.message.from_user.first_name
     welcome_message = (
@@ -108,6 +127,4 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main() -> None:
     logger.info("Starting bot...")
     application = Application.builder().token(TELEGRAM_TOKEN).build()
-    application.add_handler(CommandHandler("start", start_command))
-    application.add_handler(CommandHandler("code", code_command))
-    application.add_handler(CommandHandler("mail", mail_command))
+    application.add_handler(CommandHandler
