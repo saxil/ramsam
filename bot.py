@@ -1,5 +1,5 @@
 # bot.py
-# Final, clean version of the Gemini-powered Telegram Bot
+# Final version with simulated code execution via AI
 
 import os
 import logging
@@ -18,7 +18,6 @@ from telegram.ext import (
 
 # --- 1. CONFIGURATION & SETUP ---
 
-# Set up detailed logging to see what the bot is doing
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", 
     level=logging.INFO
@@ -26,16 +25,13 @@ logging.basicConfig(
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
-# Get API keys directly from the hosting environment (e.g., Render)
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-# Security Check: Ensure keys are present before starting
 if not TELEGRAM_TOKEN or not GEMINI_API_KEY:
     logger.critical("FATAL ERROR: TELEGRAM_TOKEN or GEMINI_API_KEY is not set.")
     exit()
 
-# Configure the Google Gemini API
 try:
     genai.configure(api_key=GEMINI_API_KEY)
 except Exception as e:
@@ -64,7 +60,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     welcome_message = (
         f"Hello, {user_name}! I am your AI assistant.\n\n"
         "Here are the commands you can use:\n"
-        "• `/code <your code>` - Formats your text as a code block.\n"
+        "• `/code <python code>` - Executes Python code and shows the output.\n"
         "• `/mail <Subject>\n<Body>` - Formats your text as an email.\n\n"
         "You can also chat with me normally, or mention me in a group!"
     )
@@ -72,23 +68,37 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def code_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Formats the user's provided text into a Markdown code block."""
+    """
+    Simulates Python code execution by sending it to the Gemini AI.
+    This is a SAFE way to run user-provided code.
+    """
     if not context.args:
-        await update.message.reply_text("Usage: /code <your code snippet>")
+        await update.message.reply_text("Usage: /code <python code snippet to execute>")
         return
     
     user_code = " ".join(context.args)
-    # Using MarkdownV2 for formatting.
-    formatted_code = f"```\n{user_code}\n```"
     
-    try:
-        await update.message.reply_text(
-            f"Here is your formatted code:\n{formatted_code}",
-            parse_mode=ParseMode.MARKDOWN_V2
-        )
-    except Exception:
-        # Fallback for cases where Markdown parsing fails due to special characters
-        await update.message.reply_text(f"Here is your code:\n\n{user_code}")
+    # Show a "typing..." status as this may take a moment
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action='typing')
+    
+    # Create a special prompt to instruct the AI to act as an interpreter
+    execution_prompt = (
+        "You are a Python code execution engine. "
+        "Execute the following Python code and return ONLY the standard output (stdout). "
+        "If the code produces an error, return ONLY the error message. "
+        "Do not provide any explanation, commentary, or formatting. "
+        "Just the raw output.\n\n"
+        f"Code:\n```python\n{user_code}\n```"
+    )
+    
+    # Get the simulated output from Gemini
+    output = await generate_gemini_response(execution_prompt)
+    
+    # Send the output back to the user, formatted as a code block
+    await update.message.reply_text(
+        f"Output:\n```\n{output}\n```",
+        parse_mode=ParseMode.MARKDOWN_V2
+    )
 
 
 async def mail_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -124,14 +134,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handles all non-command text messages and gets a response from Gemini."""
     message_text = update.message.text
     chat_id = update.effective_chat.id
-
-    # Show a "typing..." status to the user
+    
     await context.bot.send_chat_action(chat_id=chat_id, action='typing')
     
-    # Get the AI's response
     ai_response = await generate_gemini_response(message_text)
     
-    # Reply to the user's message, keeping the conversation threaded
     await update.message.reply_text(ai_response)
 
 
@@ -140,22 +147,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main() -> None:
     """Initializes and runs the Telegram bot."""
     logger.info("Bot is starting...")
-
-    # Create the bot application
     application = Application.builder().token(TELEGRAM_TOKEN).build()
 
-    # Register all the command handlers
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("code", code_command))
     application.add_handler(CommandHandler("mail", mail_command))
-    
-    # Register the general message handler (must be last)
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    # Start the bot
     logger.info("Bot is now polling for messages.")
     application.run_polling()
 
 
 if __name__ == "__main__":
     main()
+
