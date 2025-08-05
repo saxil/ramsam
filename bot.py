@@ -1,18 +1,15 @@
+# bot.py
+# Final version with a Flask web server to keep the Render service alive.
 
 import os
 import logging
-import asyncio
-import google.generativeai as genai
+import threading
+from flask import Flask
 
+import google.generativeai as genai
 from telegram import Update
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from telegram.constants import ParseMode
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    MessageHandler,
-    filters,
-    ContextTypes,
-)
 
 # --- 1. CONFIGURATION & SETUP ---
 
@@ -25,6 +22,8 @@ logger = logging.getLogger(__name__)
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+# Render provides the port to listen on in this env var
+PORT = int(os.environ.get('PORT', 8443))
 
 if not TELEGRAM_TOKEN or not GEMINI_API_KEY:
     logger.critical("FATAL ERROR: TELEGRAM_TOKEN or GEMINI_API_KEY is not set.")
@@ -36,122 +35,100 @@ except Exception as e:
     logger.critical(f"FATAL ERROR: Failed to configure Gemini API: {e}")
     exit()
 
+# --- 2. FLASK WEB SERVER (for Render Health Checks) ---
 
-# --- 2. CORE AI FUNCTION ---
+# Create a Flask app
+app = Flask(__name__)
+
+@app.route('/')
+def health_check():
+    """This route will be checked by Render to confirm the service is live."""
+    return "OK", 200
+
+def run_flask():
+    """Runs the Flask app in a separate thread."""
+    # Listens on 0.0.0.0 to be accessible by Render
+    # Uses the PORT environment variable provided by Render
+    app.run(host='0.0.0.0', port=PORT)
+
+
+# --- 3. TELEGRAM BOT LOGIC ---
+# All your bot functions (generate_gemini_response, start_command, etc.) remain the same.
 
 async def generate_gemini_response(prompt: str) -> str:
-    """Sends a prompt to the Gemini API and returns the text response."""
     try:
         model = genai.GenerativeModel('gemini-1.5-flash')
         response = await model.generate_content_async(prompt)
         return response.text
     except Exception as e:
         logger.error(f"Error communicating with Gemini API: {e}")
-        return "Sorry, I'm having trouble connecting to my brain right now. Please try again later."
-
-
-# --- 3. TELEGRAM COMMAND HANDLERS ---
+        return "Sorry, I'm having trouble connecting to my brain right now."
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Sends a welcome message when the /start command is issued."""
     user_name = update.message.from_user.first_name
     welcome_message = (
         f"Hello, {user_name}! I am your AI assistant.\n\n"
-        "Here are the commands you can use:\n"
-        "• `/code <python code>` - Executes Python code and shows the output.\n"
-        "• `/mail <Subject>\n<Body>` - Formats your text as an email.\n\n"
-        "You can also chat with me normally, or mention me in a group!"
+        "• `/code <python code>` - Executes Python code.\n"
+        "• `/mail <Subject>\n<Body>` - Formats text as an email."
     )
-    # The .reply_text() function automatically replies to the user's command.
     await update.message.reply_text(welcome_message)
 
-
 async def code_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Simulates Python code execution by sending it to the Gemini AI."""
     if not context.args:
         await update.message.reply_text("Usage: /code <python code snippet to execute>")
         return
-    
     user_code = " ".join(context.args)
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action='typing')
-    
     execution_prompt = (
         "You are a Python code execution engine. "
         "Execute the following Python code and return ONLY the standard output (stdout). "
-        "If the code produces an error, return ONLY the error message. "
-        "Do not provide any explanation, commentary, or formatting. "
-        "Just the raw output.\n\n"
-        f"Code:\n```python\n{user_code}\n```"
+        "If there's an error, return ONLY the error message. Provide no explanation."
+        f"\n\nCode:\n```python\n{user_code}\n```"
     )
-    
     output = await generate_gemini_response(execution_prompt)
-    
-    # This also replies directly to the user's /code message.
-    await update.message.reply_text(
-        f"Output:\n```\n{output}\n```",
-        parse_mode=ParseMode.MARKDOWN_V2
-    )
-
+    await update.message.reply_text(f"Output:\n```\n{output}\n```", parse_mode=ParseMode.MARKDOWN_V2)
 
 async def mail_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Formats user text into a simple email template."""
     if not context.args:
-        await update.message.reply_text("Usage: /mail <Subject Line>\n<Body of the email...>")
+        await update.message.reply_text("Usage: /mail <Subject Line>\n<Body...>")
         return
-
     full_text = " ".join(context.args)
     try:
         subject, body = full_text.split('\n', 1)
     except ValueError:
         subject = full_text
         body = "[No body provided]"
-
     user_name = update.message.from_user.first_name
-    email_template = (
-        f"*Subject:* {subject}\n\n"
-        f"*Dear Team,*\n\n"
-        f"{body}\n\n"
-        f"*Best regards,*\n{user_name}"
-    )
-    
-    # This also replies directly to the user's /mail message.
-    await update.message.reply_text(
-        f"Here is your email draft:\n---\n{email_template}",
-        parse_mode=ParseMode.MARKDOWN_V2
-    )
-
-
-# --- 4. GENERAL MESSAGE HANDLER ---
+    email_template = f"*Subject:* {subject}\n\n*Dear Team,*\n\n{body}\n\n*Best regards,*\n{user_name}"
+    await update.message.reply_text(f"Here is the email draft:\n---\n{email_template}", parse_mode=ParseMode.MARKDOWN_V2)
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handles all non-command text messages and gets a response from Gemini."""
     message_text = update.message.text
     chat_id = update.effective_chat.id
-    
     await context.bot.send_chat_action(chat_id=chat_id, action='typing')
-    
     ai_response = await generate_gemini_response(message_text)
-    
-    # This line sends the ai_response AS A REPLY to the user's original message.
     await update.message.reply_text(ai_response)
 
 
-# --- 5. MAIN BOT EXECUTION ---
+# --- 4. MAIN EXECUTION ---
 
-def main() -> None:
+def run_bot():
     """Initializes and runs the Telegram bot."""
-    logger.info("Bot is starting...")
-
+    logger.info("Starting Telegram bot...")
     application = Application.builder().token(TELEGRAM_TOKEN).build()
-
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("code", code_command))
     application.add_handler(CommandHandler("mail", mail_command))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-
-    logger.info("Bot is now polling for messages.")
+    logger.info("Telegram bot is now polling for messages.")
     application.run_polling()
 
 
 if __name__ == "__main__":
-    main()
+    # Start the Flask web server in a background thread
+    flask_thread = threading.Thread(target=run_flask)
+    flask_thread.start()
+    
+    # Start the Telegram bot in the main thread
+    run_bot()
+
